@@ -54,12 +54,17 @@ interface FeeHistoryResponse {
 // Define the structure for our chart data state
 type LineChartData = ChartData<'line', number[], string>;
 
-const BaseFeeChart: React.FC = () => {
+interface BaseFeeChartProps {
+  latestBlockNumber: number | null;
+}
+
+const BaseFeeChart: React.FC<BaseFeeChartProps> = ({ latestBlockNumber }) => {
   // --- State Variables with Types ---
   const [chartData, setChartData] = useState<LineChartData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [blockCount] = useState<number>(10); // Number of blocks
+  const [isInitialLoad, setIsInitialLoad] = useState<boolean>(true);
 
   // --- Data Fetching Effect ---
   useEffect(() => {
@@ -67,87 +72,100 @@ const BaseFeeChart: React.FC = () => {
     if (!provider) {
         setError("Alchemy provider could not be initialized. Check API Key.");
         setLoading(false);
-        return; // Stop execution if provider isn't available
+        return;
     }
 
     const fetchBaseFeeHistory = async () => {
-      setLoading(true);
-      setError(null); // Clear previous errors
+      if (isInitialLoad) {
+        setLoading(true);
+      }
+      setError(null);
       try {
-        console.log(`Workspaceing base fee history for the last ${blockCount} blocks...`);
-
-        // Type assertion: Assume the response matches our interface
-        // Alternatively, use a type guard for safer parsing
         const feeHistory = await provider.send('eth_feeHistory', [
-          ethers.toBeHex(blockCount), // blockCount as hex string
-          'latest',                  // newestBlock tag
-          [],                        // rewardPercentiles (empty array)
-        ]) as FeeHistoryResponse; // Assert the expected type
+          ethers.toBeHex(blockCount),
+          'latest',
+          [],
+        ]) as FeeHistoryResponse;
 
-        console.log("Fee History Response:", feeHistory);
-
-        // Basic validation of the response structure
         if (!feeHistory || !feeHistory.baseFeePerGas || !Array.isArray(feeHistory.baseFeePerGas) || feeHistory.baseFeePerGas.length === 0) {
             throw new Error("Invalid or empty fee history data received from Alchemy.");
         }
 
-        // --- Process Data ---
-        const oldestBlockNumber = parseInt(feeHistory.oldestBlock, 16); // Convert hex string to number
+        const oldestBlockNumber = parseInt(feeHistory.oldestBlock, 16);
         const labels: string[] = [];
         const dataPoints: number[] = [];
 
         feeHistory.baseFeePerGas.forEach((feeHex, index) => {
-          // Skip the fee for the block *after* the requested range
           if (index < blockCount) {
             const blockNumber = oldestBlockNumber + index;
             try {
-                const feeWei = BigInt(feeHex); // Use BigInt for Wei values
-                const feeGweiString = ethers.formatUnits(feeWei, 'gwei'); // Convert to Gwei string
-                const feeGwei = parseFloat(feeGweiString); // Convert Gwei string to number for chart
+                const feeWei = BigInt(feeHex);
+                const feeGweiString = ethers.formatUnits(feeWei, 'gwei');
+                const feeGwei = parseFloat(feeGweiString);
 
                 labels.push(blockNumber.toString());
                 dataPoints.push(feeGwei);
             } catch (conversionError) {
                 console.error(`Error converting fee ${feeHex} at index ${index}:`, conversionError);
-                // Handle problematic data point - e.g., skip or push a default value like 0 or NaN
-                // labels.push(blockNumber.toString());
-                // dataPoints.push(NaN); // Or some other indicator
             }
           }
         });
 
-        // Update state with formatted chart data
-        setChartData({
-          labels: labels,
-          datasets: [
-            {
-              label: 'Base Fee per Gas (Gwei)',
-              data: dataPoints,
-              borderColor: 'rgb(53, 162, 235)', // Different color example
-              backgroundColor: 'rgba(53, 162, 235, 0.5)',
-              tension: 0.1,
-              pointRadius: 2,
-            },
-          ],
-        });
+        // If we don't have chart data yet, initialize it
+        if (!chartData) {
+          setChartData({
+            labels: labels,
+            datasets: [
+              {
+                label: 'Base Fee per Gas (Gwei)',
+                data: dataPoints,
+                borderColor: 'rgb(53, 162, 235)',
+                backgroundColor: 'rgba(53, 162, 235, 0.5)',
+                tension: 0.1,
+                pointRadius: 2,
+              },
+            ],
+          });
+        } else {
+          // For incremental updates, only update the last data point
+          const lastBlockNumber = oldestBlockNumber + blockCount - 1;
+          if (!chartData.labels || lastBlockNumber.toString() !== chartData.labels[chartData.labels.length - 1]) {
+            const lastFeeHex = feeHistory.baseFeePerGas[blockCount - 1];
+            const feeWei = BigInt(lastFeeHex);
+            const feeGweiString = ethers.formatUnits(feeWei, 'gwei');
+            const feeGwei = parseFloat(feeGweiString);
 
-      } catch (err: unknown) { // Catch block error type is 'unknown'
+            setChartData(prevData => {
+              if (!prevData || !prevData.labels) return prevData;
+              return {
+                ...prevData,
+                labels: [...prevData.labels.slice(1), lastBlockNumber.toString()],
+                datasets: prevData.datasets.map(dataset => ({
+                  ...dataset,
+                  data: [...dataset.data.slice(1), feeGwei]
+                }))
+              };
+            });
+          }
+        }
+
+      } catch (err: unknown) {
         console.error("Error fetching base fee history:", err);
-        // Type guard to check if it's an Error object
         if (err instanceof Error) {
           setError(err.message);
         } else {
           setError('An unknown error occurred while fetching data.');
         }
       } finally {
-        setLoading(false); // Ensure loading is set to false in all cases
+        if (isInitialLoad) {
+          setLoading(false);
+          setIsInitialLoad(false);
+        }
       }
     };
 
     fetchBaseFeeHistory();
-    // Disable exhaustive-deps linting rule for this line if blockCount is stable
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockCount]); // Dependency array
+  }, [blockCount, latestBlockNumber, isInitialLoad]);
 
   // --- Render Logic ---
   if (error) {
@@ -163,12 +181,12 @@ const BaseFeeChart: React.FC = () => {
   }
 
   // --- Typed Chart Options ---
-  const options: ChartOptions<'line'> = { // Use ChartOptions type
+  const options: ChartOptions<'line'> = {
     responsive: true,
-    maintainAspectRatio: true, // Adjust as needed
+    maintainAspectRatio: true,
     plugins: {
       legend: {
-        position: 'top' as const, // Use 'as const' for literal types
+        position: 'top' as const,
       },
       title: {
         display: true,
@@ -176,13 +194,13 @@ const BaseFeeChart: React.FC = () => {
       },
        tooltip: {
          callbacks: {
-            label: (context: TooltipItem<'line'>): string => { // Type the context
+            label: (context: TooltipItem<'line'>): string => {
                let label = context.dataset.label || '';
                if (label) {
                   label += ': ';
                }
                if (context.parsed.y !== null) {
-                  label += context.parsed.y.toFixed(4) + ' Gwei'; // Format Gwei value
+                  label += context.parsed.y.toFixed(4) + ' Gwei';
                }
                return label;
             }
@@ -201,12 +219,11 @@ const BaseFeeChart: React.FC = () => {
                 display: true,
                 text: 'Base Fee (Gwei)'
             },
-            beginAtZero: false // Sensible default for fee charts
+            beginAtZero: false
         }
     }
   };
 
-  // --- Render Chart ---
   return (
     <div style={{ padding: '20px', maxWidth: '900px', margin: 'auto', border: '1px solid #eee' }}>
       <h2 style={{ textAlign: 'center' }}>Base Fee Chart</h2>

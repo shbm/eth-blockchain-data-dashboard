@@ -40,3 +40,18 @@
 .read-the-docs {
   color: #888;
 }
+
+.connection-status {
+  text-align: center;
+  padding: 5px;
+  font-size: 0.9em;
+  margin-bottom: 10px;
+}
+
+.connection-status.connected {
+  color: #4caf50;
+}
+
+.connection-status.disconnected {
+  color: #f44336;
+}

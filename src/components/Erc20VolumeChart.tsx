@@ -43,7 +43,7 @@ type BarChartData = ChartData<'bar', number[], string>;
 const DEFAULT_TOKEN_ADDRESS = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const BLOCKS_TO_CHECK = 10;
 
-const Erc20VolumeChart: React.FC = () => {
+const Erc20VolumeChart: React.FC<{ latestBlockNumber: number | null }> = ({ latestBlockNumber }) => {
   // --- State ---
   const [tokenAddress, setTokenAddress] = useState<string>(DEFAULT_TOKEN_ADDRESS);
   const [tokenDecimals, setTokenDecimals] = useState<number | null>(null);
@@ -52,11 +52,6 @@ const Erc20VolumeChart: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastBlockChecked, setLastBlockChecked] = useState<number | null>(null);
-
-  // Add useEffect to fetch data on mount
-  useEffect(() => {
-    fetchVolumeData(DEFAULT_TOKEN_ADDRESS);
-  }, []); // Empty dependency array means this runs once on mount
 
   // --- Data Fetching Function ---
   const fetchVolumeData = useCallback(async (address: string) => {
@@ -71,7 +66,6 @@ const Erc20VolumeChart: React.FC = () => {
 
     setLoading(true);
     setError(null);
-    setChartData(null); // Clear previous chart
     setTokenDecimals(null);
     setTokenSymbol(null);
     setLastBlockChecked(null);
@@ -82,9 +76,8 @@ const Erc20VolumeChart: React.FC = () => {
       let symbol: string;
       try {
         const contract = new ethers.Contract(address, erc20Abi, provider);
-        // Use Promise.all for concurrent fetching
         [decimals, symbol] = await Promise.all([
-          contract.decimals().then(d => Number(d)), // Convert BigInt/number result to number
+          contract.decimals().then(d => Number(d)),
           contract.symbol()
         ]);
         setTokenDecimals(decimals);
@@ -97,29 +90,25 @@ const Erc20VolumeChart: React.FC = () => {
       // 2. Get Block Range
       const latestBlockNumber = await provider.getBlockNumber();
       setLastBlockChecked(latestBlockNumber);
-      const fromBlock = latestBlockNumber - BLOCKS_TO_CHECK + 1; // Inclusive range
+      const fromBlock = latestBlockNumber - BLOCKS_TO_CHECK + 1;
 
       // 3. Fetch Transfer Logs using eth_getLogs
-      console.log(`Workspaceing 'Transfer' logs for ${symbol} (${address}) from block ${fromBlock} to ${latestBlockNumber}`);
       const logs: TransferLog[] = await provider.send('eth_getLogs', [{
         fromBlock: ethers.toBeHex(fromBlock),
         toBlock: ethers.toBeHex(latestBlockNumber),
-        address: address, // Filter by token contract address
-        topics: [TRANSFER_EVENT_SIGNATURE] // Filter by Transfer event signature
+        address: address,
+        topics: [TRANSFER_EVENT_SIGNATURE]
       }]);
 
-      console.log(`Found ${logs.length} Transfer logs.`);
-
       // 4. Process Logs and Aggregate Volume per Block
-      const volumePerBlock = new Map<number, bigint>(); // Use Map<blockNumber, totalVolumeBigInt>
+      const volumePerBlock = new Map<number, bigint>();
       for (let i = 0; i < BLOCKS_TO_CHECK; i++) {
-         volumePerBlock.set(fromBlock + i, 0n); // Initialize volume for all blocks in range
+         volumePerBlock.set(fromBlock + i, 0n);
       }
 
       const abiCoder = ethers.AbiCoder.defaultAbiCoder();
       logs.forEach(log => {
         try {
-          // Convert hex block number to decimal
           const blockNumber = typeof log.blockNumber === 'string' ? 
             parseInt(log.blockNumber, 16) : 
             log.blockNumber;
@@ -128,38 +117,55 @@ const Erc20VolumeChart: React.FC = () => {
           const value = decodedData[0] as bigint;
 
           const currentVolume = volumePerBlock.get(blockNumber) ?? 0n;
-          console.log("volumePerBlock");
           volumePerBlock.set(blockNumber, currentVolume + value);
         } catch (decodeError) {
           console.warn(`Failed to decode log data at block ${log.blockNumber}:`, log.data, decodeError);
-          // Decide how to handle: skip log, set error state, etc.
         }
       });
 
       // 5. Format Data for Chart.js
       const labels: string[] = [];
       const dataPoints: number[] = [];
-      console.log(volumePerBlock);
       volumePerBlock.forEach((volumeWei, blockNumber) => {
          labels.push(blockNumber.toString());
-         // Convert BigInt volume (in wei-like units) to number using decimals for display
          const volumeFormatted = parseFloat(ethers.formatUnits(volumeWei, decimals));
          dataPoints.push(volumeFormatted);
       });
-      console.log(labels);
 
-      setChartData({
-        labels: labels,
-        datasets: [
-          {
-            label: `Volume (${symbol})`,
-            data: dataPoints,
-            backgroundColor: 'rgba(255, 99, 132, 0.6)', // Example color
-            borderColor: 'rgba(255, 99, 132, 1)',
-            borderWidth: 1,
-          },
-        ],
-      });
+      // If we don't have chart data yet, initialize it
+      if (!chartData) {
+        setChartData({
+          labels: labels,
+          datasets: [
+            {
+              label: `Volume (${symbol})`,
+              data: dataPoints,
+              backgroundColor: 'rgba(255, 99, 132, 0.6)',
+              borderColor: 'rgba(255, 99, 132, 1)',
+              borderWidth: 1,
+            },
+          ],
+        });
+      } else {
+        // For incremental updates, only update the last data point
+        const lastBlockNumber = latestBlockNumber;
+        if (!chartData.labels || lastBlockNumber.toString() !== chartData.labels[chartData.labels.length - 1]) {
+          const lastBlockVolume = volumePerBlock.get(lastBlockNumber) ?? 0n;
+          const volumeFormatted = parseFloat(ethers.formatUnits(lastBlockVolume, decimals));
+
+          setChartData(prevData => {
+            if (!prevData || !prevData.labels) return prevData;
+            return {
+              ...prevData,
+              labels: [...prevData.labels.slice(1), lastBlockNumber.toString()],
+              datasets: prevData.datasets.map(dataset => ({
+                ...dataset,
+                data: [...dataset.data.slice(1), volumeFormatted]
+              }))
+            };
+          });
+        }
+      }
 
     } catch (err: unknown) {
       console.error("Error fetching ERC20 volume:", err);
@@ -168,7 +174,6 @@ const Erc20VolumeChart: React.FC = () => {
       } else {
         setError('An unknown error occurred while fetching volume data.');
       }
-      // Clear potentially partial data on error
       setChartData(null);
       setTokenDecimals(null);
       setTokenSymbol(null);
@@ -176,6 +181,13 @@ const Erc20VolumeChart: React.FC = () => {
       setLoading(false);
     }
   }, []); // useCallback dependency array is empty as provider is stable
+
+  // Update useEffect to react to new blocks
+  useEffect(() => {
+    if (latestBlockNumber !== null) {
+      fetchVolumeData(tokenAddress);
+    }
+  }, [latestBlockNumber, tokenAddress, fetchVolumeData]);
 
   // --- Event Handler ---
   const handleAddressChange = (event: React.ChangeEvent<HTMLInputElement>) => {

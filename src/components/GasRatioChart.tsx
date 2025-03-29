@@ -15,38 +15,37 @@ import { createChartOptions } from '../config/chartConfig';
 type RatioLineChartData = ChartData<'line', number[], string>;
 const BLOCKS_TO_DISPLAY = 10;
 
-const GasRatioChart: React.FC = () => {
+interface GasRatioChartProps {
+  latestBlockNumber: number | null;
+}
+
+const GasRatioChart: React.FC<GasRatioChartProps> = ({ latestBlockNumber }) => {
   // --- Use the custom hook ---
-  // Note: This triggers a separate fetch if rendered concurrently with BlockGasChart
-  // For true shared fetching, Lift State Up or use Context/Recoil/Zustand might be needed
-  // But for this example, the hook provides good code reuse.
-  const { data: blockData, loading, error, startBlock, endBlock } = useBlockGasData(BLOCKS_TO_DISPLAY);
+  const { data: blockData, loading, error, startBlock, endBlock } = useBlockGasData(BLOCKS_TO_DISPLAY, latestBlockNumber);
 
   // --- State for Chart.js specific data structure ---
   const [chartData, setChartData] = useState<RatioLineChartData | null>(null);
 
   // --- Effect to calculate ratio and format chart data ---
   useEffect(() => {
-    if (blockData && blockData.length > 0) {
+    if (!blockData || blockData.length === 0) {
+      setChartData(null);
+      return;
+    }
+
+    // If we don't have chart data yet, initialize it
+    if (!chartData) {
       const labels: string[] = [];
       const ratioData: number[] = [];
 
       blockData.forEach(block => {
         labels.push(block.number.toString());
-
-        // Calculate ratio: (gasUsed / gasLimit) * 100
-        // Convert BigInt to Number for floating-point division
         const gasUsedNum = Number(block.gasUsed);
         const gasLimitNum = Number(block.gasLimit);
-
-        let ratioPercent = 0; // Default to 0 if limit is 0
+        let ratioPercent = 0;
         if (gasLimitNum > 0) {
-          // Calculate percentage and handle potential NaN (though unlikely with check)
-          ratioPercent = parseFloat(((gasUsedNum / gasLimitNum) * 100).toFixed(2)); // Keep 2 decimal places
-        } else {
-            console.warn(`Block ${block.number} has gasLimit 0.`);
+          ratioPercent = parseFloat(((gasUsedNum / gasLimitNum) * 100).toFixed(2));
         }
-
         ratioData.push(ratioPercent);
       });
 
@@ -56,18 +55,43 @@ const GasRatioChart: React.FC = () => {
           {
             label: 'Gas Usage (%)',
             data: ratioData,
-            borderColor: 'rgb(75, 192, 192)', // Teal color
+            borderColor: 'rgb(75, 192, 192)',
             backgroundColor: 'rgba(75, 192, 192, 0.5)',
-            fill: true, // Optional: Fill area under line
+            fill: true,
             tension: 0.1,
             pointRadius: 2,
           },
         ],
       });
-    } else {
-        setChartData(null); // Clear chart if no data
+      return;
     }
-  }, [blockData]); // Re-run calculation when blockData changes
+
+    // For incremental updates, only update the last data point
+    const lastBlock = blockData[blockData.length - 1];
+    const lastBlockNumber = lastBlock.number;
+    
+    // Check if this is a new block we haven't processed yet
+    if (!chartData.labels || lastBlockNumber.toString() !== chartData.labels[chartData.labels.length - 1]) {
+      const gasUsedNum = Number(lastBlock.gasUsed);
+      const gasLimitNum = Number(lastBlock.gasLimit);
+      let ratioPercent = 0;
+      if (gasLimitNum > 0) {
+        ratioPercent = parseFloat(((gasUsedNum / gasLimitNum) * 100).toFixed(2));
+      }
+
+      setChartData(prevData => {
+        if (!prevData || !prevData.labels) return prevData;
+        return {
+          ...prevData,
+          labels: [...prevData.labels.slice(1), lastBlockNumber.toString()],
+          datasets: prevData.datasets.map(dataset => ({
+            ...dataset,
+            data: [...dataset.data.slice(1), ratioPercent]
+          }))
+        };
+      });
+    }
+  }, [blockData]);
 
   // --- Chart Options ---
   const options: ChartOptions<'line'> = useMemo(() => 

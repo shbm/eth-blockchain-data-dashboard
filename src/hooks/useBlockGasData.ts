@@ -25,13 +25,14 @@ interface UseBlockGasDataReturn {
     endBlock: number | null;
 }
 
-export const useBlockGasData = (blockCount: number): UseBlockGasDataReturn => {
+export const useBlockGasData = (blockCount: number, latestBlockNumber: number | null): UseBlockGasDataReturn => {
   const [data, setData] = useState<BlockGasInfo[] | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [startBlock, setStartBlock] = useState<number | null>(null);
   const [endBlock, setEndBlock] = useState<number | null>(null);
 
+  // Initial data fetch
   useEffect(() => {
     if (!provider) {
       setError("Alchemy provider not initialized. Check API Key.");
@@ -44,20 +45,19 @@ export const useBlockGasData = (blockCount: number): UseBlockGasDataReturn => {
         return;
     }
 
-    let isMounted = true; // Prevent state updates on unmounted component
-    const fetchBlocks = async () => {
+    let isMounted = true;
+    const fetchInitialBlocks = async () => {
       setLoading(true);
       setError(null);
-      setData(null); // Clear previous data
+      setData(null);
       setStartBlock(null);
       setEndBlock(null);
 
       try {
-        const latestBlockNumber = await provider.getBlockNumber();
-        const end = latestBlockNumber;
-        const start = Math.max(0, end - blockCount + 1); // Ensure start isn't negative
+        const end = await provider.getBlockNumber();
+        const start = Math.max(0, end - blockCount + 1);
 
-        if (!isMounted) return; // Check before setting state
+        if (!isMounted) return;
         setStartBlock(start);
         setEndBlock(end);
 
@@ -65,15 +65,14 @@ export const useBlockGasData = (blockCount: number): UseBlockGasDataReturn => {
         for (let i = start; i <= end; i++) {
           blockNumbersToFetch.push(i);
         }
-        console.log(`Hook fetching gas data for blocks: ${start} to ${end}`);
 
         const blockPromises = blockNumbersToFetch.map(blockNum =>
-          provider.getBlock(blockNum, false) // Fetch header only
+          provider.getBlock(blockNum, false)
         );
         const resolvedBlocks = await Promise.all(blockPromises);
         const validBlocks = resolvedBlocks.filter(block => block !== null) as ethers.Block[];
 
-        if (!isMounted) return; // Check again before final state updates
+        if (!isMounted) return;
 
         if (validBlocks.length !== blockNumbersToFetch.length) {
              console.warn(`Hook expected ${blockNumbersToFetch.length} blocks, but received ${validBlocks.length}.`);
@@ -82,7 +81,6 @@ export const useBlockGasData = (blockCount: number): UseBlockGasDataReturn => {
 
         validBlocks.sort((a, b) => a.number - b.number);
 
-        // Map to our specific BlockGasInfo structure
         const formattedData: BlockGasInfo[] = validBlocks.map(block => ({
             number: block.number,
             gasUsed: block.gasUsed,
@@ -93,7 +91,7 @@ export const useBlockGasData = (blockCount: number): UseBlockGasDataReturn => {
         setData(formattedData);
 
       } catch (err: unknown) {
-        console.error("Hook error fetching block gas data:", err);
+        console.error("Hook error fetching initial block gas data:", err);
         if (isMounted) {
             if (err instanceof Error) setError(err.message);
             else setError('Hook: An unknown error occurred.');
@@ -106,13 +104,56 @@ export const useBlockGasData = (blockCount: number): UseBlockGasDataReturn => {
       }
     };
 
-    fetchBlocks();
+    fetchInitialBlocks();
 
-    // Cleanup function
     return () => {
         isMounted = false;
     };
-  }, [blockCount]); // Re-run effect if blockCount changes
+  }, [blockCount]); // Only run on initial mount or when blockCount changes
+
+  // Update with new blocks
+  useEffect(() => {
+    if (!provider || !latestBlockNumber || !data) return;
+
+    let isMounted = true;
+    const fetchNewBlock = async () => {
+      try {
+        const newBlock = await provider.getBlock(latestBlockNumber, false);
+        if (!newBlock || !isMounted) return;
+
+        // Check if we already have this block
+        if (data.some(block => block.number === newBlock.number)) return;
+
+        // Create new block info
+        const newBlockInfo: BlockGasInfo = {
+          number: newBlock.number,
+          gasUsed: newBlock.gasUsed,
+          gasLimit: newBlock.gasLimit,
+          timestamp: newBlock.timestamp
+        };
+
+        // Update data by removing oldest block and adding new one
+        setData(prevData => {
+          if (!prevData) return [newBlockInfo];
+          const newData = [...prevData.slice(1), newBlockInfo];
+          return newData;
+        });
+
+        // Update block range
+        setStartBlock(prev => prev ? prev + 1 : null);
+        setEndBlock(newBlock.number);
+
+      } catch (err) {
+        console.error("Error fetching new block:", err);
+      }
+    };
+
+    fetchNewBlock();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [latestBlockNumber]); // Only run when latestBlockNumber changes
 
   return { data, loading, error, startBlock, endBlock };
 };
