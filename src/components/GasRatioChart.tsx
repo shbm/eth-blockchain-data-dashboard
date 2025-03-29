@@ -8,6 +8,8 @@ import {
   // Assume ChartJS elements are registered globally
 } from 'chart.js';
 import { useBlockGasData } from '../hooks/useBlockGasData'; // Import the custom hook
+import ChartWrapper from './ChartWrapper';
+import { createChartOptions } from '../config/chartConfig';
 
 // Type Definitions
 type RatioLineChartData = ChartData<'line', number[], string>;
@@ -68,57 +70,30 @@ const GasRatioChart: React.FC = () => {
   }, [blockData]); // Re-run calculation when blockData changes
 
   // --- Chart Options ---
-  const options: ChartOptions<'line'> = useMemo(() => ({
-    responsive: true,
-    maintainAspectRatio: true,
-    plugins: {
-      legend: { position: 'top' as const },
-      title: {
-        display: true,
-        text: `Block Gas Utilization (${startBlock !== null && endBlock !== null ? `Blocks ${startBlock} to ${endBlock}` : `Last ${BLOCKS_TO_DISPLAY} Blocks`})`,
-      },
-      tooltip: {
-        callbacks: {
-            label: (context: TooltipItem<'line'>): string => {
-               let label = context.dataset.label || '';
-               if (label) label += ': ';
-               // Add '%' sign to tooltip value
-               if (context.parsed.y !== null) label += context.parsed.y.toFixed(2) + '%';
-               return label;
-            }
-         }
+  const options: ChartOptions<'line'> = useMemo(() => 
+    createChartOptions<'line'>(
+      `Block Gas Utilization (${startBlock !== null && endBlock !== null ? `Blocks ${startBlock} to ${endBlock}` : `Last ${BLOCKS_TO_DISPLAY} Blocks`})`,
+      'Block Number',
+      'Gas Usage (%)',
+      (context: TooltipItem<'line'>): string => {
+        let label = context.dataset.label || '';
+        if (label) label += ': ';
+        if (context.parsed.y !== null) label += context.parsed.y.toFixed(2) + '%';
+        return label;
       }
-    },
-    scales: {
-      x: {
-        title: { display: true, text: 'Block Number' }
-      },
-      y: { // Primary Y-axis (Percentage)
-        title: { display: true, text: 'Gas Usage (%)' },
-        min: 0,   // Set minimum value for Y-axis
-        max: 100, // Set maximum value for Y-axis
-        ticks: {
-            // Optional: Add '%' sign to axis ticks
-            callback: function(value) {
-                return value + '%';
-            }
-        }
-      },
-    },
-  }), [startBlock, endBlock]);
-
+    ),
+    [startBlock, endBlock]
+  );
 
   // --- Render Logic ---
   return (
-    <div style={{ padding: '20px', maxWidth: '900px', margin: '30px auto', border: '1px solid #eee' }}>
-      <h2 style={{ textAlign: 'center' }}>Block Gas Utilization (%)</h2>
-      {loading && <div style={{ padding: '20px', textAlign: 'center' }}>Loading Block Data...</div>}
-      {error && <div style={{ color: 'red', padding: '10px', border: '1px solid red', marginTop: '10px' }}>Error: {error}</div>}
-      {!loading && !error && !chartData && <div style={{ padding: '20px', textAlign: 'center' }}>No gas ratio data available.</div>}
-      {chartData && (
-          <Line options={options} data={chartData} />
-      )}
-    </div>
+    <ChartWrapper
+      title="Block Gas Utilization (%)"
+      loading={loading}
+      error={error}
+    >
+      {chartData && <Line options={options} data={chartData} />}
+    </ChartWrapper>
   );
 };
 

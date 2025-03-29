@@ -1,5 +1,5 @@
 // src/components/Erc20VolumeChart.tsx
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { Bar } from 'react-chartjs-2';
 import {
@@ -52,6 +52,11 @@ const Erc20VolumeChart: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastBlockChecked, setLastBlockChecked] = useState<number | null>(null);
+
+  // Add useEffect to fetch data on mount
+  useEffect(() => {
+    fetchVolumeData(DEFAULT_TOKEN_ADDRESS);
+  }, []); // Empty dependency array means this runs once on mount
 
   // --- Data Fetching Function ---
   const fetchVolumeData = useCallback(async (address: string) => {

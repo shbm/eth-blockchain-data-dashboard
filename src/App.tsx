@@ -2,7 +2,6 @@
 import React from 'react';
 import BaseFeeChart from './components/BaseFeeChart';
 import Erc20VolumeChart from './components/Erc20VolumeChart';
-import BlockGasChart from './components/BlockGasChart';
 import GasRatioChart from './components/GasRatioChart'; // Import the new ratio chart
 import './App.css';
 
