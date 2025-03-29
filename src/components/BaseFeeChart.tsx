@@ -15,6 +15,7 @@ import {
   ChartOptions, // Import ChartOptions type
   TooltipItem // Import TooltipItem type
 } from 'chart.js';
+import { httpProvider } from '../config/provider';
 
 // --- Register Chart.js components ---
 ChartJS.register(
@@ -26,22 +27,6 @@ ChartJS.register(
   Tooltip,
   Legend
 );
-
-// --- Environment Variable Access (Type Safe) ---
-// Vite (Recommended)
-// Create React App
-// Choose the one that's defined based on your build tool
-const ALCHEMY_API_KEY = "SaPOUALvqdzgN_e8i300eXfszDP4cHsu";
-
-
-if (!ALCHEMY_API_KEY) {
-    console.warn("Alchemy API Key not found in environment variables (.env). Please ensure VITE_ALCHEMY_API_KEY (for Vite) or REACT_APP_ALCHEMY_API_KEY (for CRA) is set.");
-}
-
-const ALCHEMY_URL = `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
-
-// Initialize provider only if API key exists
-const provider = ALCHEMY_API_KEY ? new ethers.JsonRpcProvider(ALCHEMY_URL) : null;
 
 // --- Type Definitions ---
 // Define an interface for the expected structure from eth_feeHistory
@@ -68,8 +53,7 @@ const BaseFeeChart: React.FC<BaseFeeChartProps> = ({ latestBlockNumber }) => {
 
   // --- Data Fetching Effect ---
   useEffect(() => {
-    // Check if provider was successfully initialized
-    if (!provider) {
+    if (!httpProvider) {
         setError("Alchemy provider could not be initialized. Check API Key.");
         setLoading(false);
         return;
@@ -81,7 +65,7 @@ const BaseFeeChart: React.FC<BaseFeeChartProps> = ({ latestBlockNumber }) => {
       }
       setError(null);
       try {
-        const feeHistory = await provider.send('eth_feeHistory', [
+        const feeHistory = await httpProvider!.send('eth_feeHistory', [
           ethers.toBeHex(blockCount),
           'latest',
           [],

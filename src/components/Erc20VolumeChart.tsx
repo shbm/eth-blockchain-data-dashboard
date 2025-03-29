@@ -15,6 +15,7 @@ import {
   TooltipItem
 } from 'chart.js';
 import { erc20Abi, TRANSFER_EVENT_SIGNATURE } from '../config/erc20Abi'; // Adjust path if needed
+import { httpProvider } from '../config/provider';
 
 // --- Register Chart.js components (including BarElement) ---
 ChartJS.register(
@@ -25,11 +26,6 @@ ChartJS.register(
   Tooltip,
   Legend
 );
-
-// --- Environment Variable & Provider Setup (same as BaseFeeChart) ---
-const ALCHEMY_API_KEY = "SaPOUALvqdzgN_e8i300eXfszDP4cHsu";
-const ALCHEMY_URL = `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
-const provider = ALCHEMY_API_KEY ? new ethers.JsonRpcProvider(ALCHEMY_URL) : null;
 
 // --- Type Definitions ---
 interface TransferLog {
@@ -55,7 +51,7 @@ const Erc20VolumeChart: React.FC<{ latestBlockNumber: number | null }> = ({ late
 
   // --- Data Fetching Function ---
   const fetchVolumeData = useCallback(async (address: string) => {
-    if (!provider) {
+    if (!httpProvider) {
       setError("Alchemy provider not initialized. Check API Key.");
       return;
     }
@@ -75,10 +71,10 @@ const Erc20VolumeChart: React.FC<{ latestBlockNumber: number | null }> = ({ late
       let decimals: number;
       let symbol: string;
       try {
-        const contract = new ethers.Contract(address, erc20Abi, provider);
+        const tokenContract = new ethers.Contract(address, erc20Abi, httpProvider);
         [decimals, symbol] = await Promise.all([
-          contract.decimals().then(d => Number(d)),
-          contract.symbol()
+          tokenContract.decimals().then(d => Number(d)),
+          tokenContract.symbol()
         ]);
         setTokenDecimals(decimals);
         setTokenSymbol(symbol);
@@ -88,12 +84,12 @@ const Erc20VolumeChart: React.FC<{ latestBlockNumber: number | null }> = ({ late
       }
 
       // 2. Get Block Range
-      const latestBlockNumber = await provider.getBlockNumber();
+      const latestBlockNumber = await httpProvider.getBlockNumber();
       setLastBlockChecked(latestBlockNumber);
       const fromBlock = latestBlockNumber - BLOCKS_TO_CHECK + 1;
 
       // 3. Fetch Transfer Logs using eth_getLogs
-      const logs: TransferLog[] = await provider.send('eth_getLogs', [{
+      const logs: TransferLog[] = await httpProvider.send('eth_getLogs', [{
         fromBlock: ethers.toBeHex(fromBlock),
         toBlock: ethers.toBeHex(latestBlockNumber),
         address: address,
@@ -261,7 +257,7 @@ const Erc20VolumeChart: React.FC<{ latestBlockNumber: number | null }> = ({ late
           style={{ flexGrow: 1, minWidth: '300px', padding: '8px' }}
           disabled={loading}
         />
-        <button onClick={handleFetchClick} disabled={loading || !tokenAddress || !provider}>
+        <button onClick={handleFetchClick} disabled={loading || !tokenAddress || !httpProvider}>
           {loading ? 'Fetching...' : 'Fetch Volume'}
         </button>
       </div>
